@@ -1,5 +1,5 @@
-# यह Microsoft का ऑफिसियल इमेज है जिसमें ब्राउज़र की सारी फाइल्स पहले से होती हैं
-FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
+# यहाँ हमने वर्ज़न 1.58.0 कर दिया है
+FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
 
 WORKDIR /app
 
