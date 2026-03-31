@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright, Browser
 TELEGRAM_BOT_TOKEN = '8525631445:AAHERO51zaOvRCbqsvpVi7S94HamddU6bfI'
 ADMIN_ID = 8571870755
 
-PLAYWRIGHT_HEADLESS = False  # सर्वर पर चला रहे हैं तो इसे True कर दें
+PLAYWRIGHT_HEADLESS = True  # सर्वर पर चला रहे हैं तो इसे True कर दें
 PLAYWRIGHT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
 CONFIG_FILE = 'config_bulk.json'
