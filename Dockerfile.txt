@@ -1,7 +1,6 @@
-# Playwright का ऑफिसियल इमेज इस्तेमाल कर रहे हैं ताकि कोई एरर न आए
+# यह Microsoft का ऑफिसियल इमेज है जिसमें ब्राउज़र की सारी फाइल्स पहले से होती हैं
 FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
 
-# वर्किंग डायरेक्टरी सेट करें
 WORKDIR /app
 
 # Requirements फाइल कॉपी करें
@@ -10,9 +9,8 @@ COPY requirements.txt .
 # पैकेजेस इनस्टॉल करें
 RUN pip install --no-cache-dir -r requirements.txt
 
-# बाकी सारी फाइल्स कॉपी करें
+# आपकी बाकी सारी फाइल्स कॉपी करें
 COPY . .
 
-# आपकी पायथन फाइल का नाम अगर chauhan.py है तो नीचे chauhan.py लिखें। 
-# अगर main.py है तो main.py लिखें।
+# बॉट को स्टार्ट करें
 CMD ["python", "chauhan.py"]
