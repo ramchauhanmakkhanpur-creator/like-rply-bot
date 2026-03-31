@@ -13,7 +13,10 @@ from playwright.async_api import async_playwright, Browser
 TELEGRAM_BOT_TOKEN = '8525631445:AAHERO51zaOvRCbqsvpVi7S94HamddU6bfI'
 ADMIN_ID = 8571870755
 
-PLAYWRIGHT_HEADLESS = True  # PC या Server दोनों पर बिना स्क्रीन खुले बैकग्राउंड में चलेगा
+# 👇 यहाँ अपना Secret Password सेट करें 👇
+SECRET_PASSWORD = "thakur@789a" 
+
+PLAYWRIGHT_HEADLESS = True  # सर्वर पर चला रहे हैं तो इसे True कर दें
 PLAYWRIGHT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
 CONFIG_FILE = 'config_bulk.json'
@@ -31,7 +34,7 @@ RANDOM_COMMENTS = [
 browser: Browser = None
 playwright_instance = None
 running_users = {}
-data_lock = asyncio.Lock()
+data_lock = asyncio.Lock() # 🟢 Race condition रोकने के लिए Lock
 
 # ====================== DATA STORAGE ======================
 user_configs = {}
@@ -44,7 +47,7 @@ if os.path.exists(CONFIG_FILE):
     except:
         user_configs = {}
 
-# 🟢 Async File Saving (Race condition रोकने के लिए)
+# 🟢 Async File Saving (ताकि बॉट हैंग न हो और बैकग्राउंड में सेव होता रहे)
 async def save_data():
     async with data_lock:
         await asyncio.to_thread(_write_json_sync)
@@ -93,6 +96,7 @@ async def process_bulk_logins(uid: str, bot, accounts_list: list):
     for acc in accounts_list:
         username, password = acc['username'], acc['password']
         
+        # Agar account pehle se list me hai to skip karega
         already_exists = any(a['username'] == username for a in user_configs[uid]['accounts'])
         if already_exists:
             continue
@@ -104,7 +108,7 @@ async def process_bulk_logins(uid: str, bot, accounts_list: list):
         login_success = False
         try:
             print(f"🔄 Logging in: {username}")
-            await page.goto('https://www.instagram.com/accounts/login/', timeout=40000, wait_until='domcontentloaded')
+            await page.goto('https://www.instagram.com/accounts/login/', timeout=40000)
             
             try:
                 btn = await page.wait_for_selector('button:has-text("Allow all cookies")', timeout=1000)
@@ -121,34 +125,44 @@ async def process_bulk_logins(uid: str, bot, accounts_list: list):
                 await pfield.click()
                 await pfield.type(password, delay=15) 
             
+            # Login बटन (Enter) दबाना
             await page.keyboard.press('Enter')
-            await asyncio.sleep(6) 
+            
+            print(f"⏳ [{username}] Login details submitted. Waiting exactly 10 seconds...")
+            
+            # 🟢 10 सेकंड तक उसी पेज पर रुकना (Session पूरी तरह लोड होने के लिए)
+            await asyncio.sleep(10) 
 
             current_url = page.url
+            # 🟢 Checking if login failed (Wrong Pass/Blocked)
             if 'challenge' in current_url or 'checkpoint' in current_url or 'suspended' in current_url or 'login' in current_url:
                 login_success = False
             else:
                 login_success = True
             
             if login_success:
+                # 🟢 10 सेकंड रुकने के बाद Session (Cookies) को अच्छी तरह सेव करना
                 storage_state = await ctx.storage_state()
                 user_configs[uid]['accounts'].append({
                     'username': username,
                     'session': storage_state
                 })
-                await save_data()
+                await save_data() # Async save call
                 success_count += 1
-                print(f"✅ Login OK: {username}")
+                print(f"✅ Login OK & Session Saved Perfectly: {username}")
             else:
                 fail_count += 1
-                await bot.send_message(chat_id=int(uid), text=f"❌ <b>लॉगिन विफल:</b> <code>{username}</code>\n⚠️ कारण: पासवर्ड गलत है या ब्लॉक है।", parse_mode='HTML')
+                # 🟢 Notifying user about specific failed account and skipping
+                await bot.send_message(chat_id=int(uid), text=f"❌ **लॉगिन विफल (Failed):** `{username}`\n⚠️ कारण: पासवर्ड/यूजरनेम गलत है या अकाउंट ब्लॉक है। (Skipping to next...)")
                 print(f"❌ Login Failed: {username}")
 
         except Exception as e:
             fail_count += 1
-            await bot.send_message(chat_id=int(uid), text=f"❌ <b>Error:</b> <code>{username}</code> को लॉगिन करते समय समस्या आई।", parse_mode='HTML')
+            await bot.send_message(chat_id=int(uid), text=f"❌ **Error:** `{username}` को लॉगिन करते समय समस्या आई। (Skipping...)")
             print(f"Error login {username}: {e}")
         finally:
+            # 🟢 अच्छी तरह से ब्राउज़र टैब (Context) क्लोज़ करना ताकि अगला अकाउंट फ्रेश खुले
+            print(f"🧹 Closing browser context for {username} and moving to next...")
             await ctx.close()
             await asyncio.sleep(2) 
 
@@ -156,11 +170,11 @@ async def process_bulk_logins(uid: str, bot, accounts_list: list):
     
     await bot.send_message(
         chat_id=int(uid), 
-        text=f"✅ <b>लॉगिन प्रक्रिया पूरी हो गई!</b>\n\n🟢 सफल (Success): {success_count}\n🔴 विफल (Failed): {fail_count}\n\n👥 <b>अब आपके पास कुल {total_accounts} अकाउंट्स हो गए हैं।</b>",
-        parse_mode='HTML'
+        text=f"✅ **लॉगिन प्रक्रिया पूरी हो गई!**\n\n🟢 सफल (Success): {success_count}\n🔴 विफल (Failed): {fail_count}\n\n👥 **अब आपके पास कुल {total_accounts} अकाउंट्स हो गए हैं।**\n(बॉट अब इन सभी अकाउंट्स से रील्स पर काम करेगा!)",
+        parse_mode='Markdown'
     )
 
-# ====================== REEL ACTIONS (SILENT FAILURE FIX) ======================
+# ====================== REEL ACTIONS ======================
 async def perform_reel_actions(username: str, session_state: dict, reel_url: str) -> bool:
     ctx = await browser.new_context(storage_state=session_state, user_agent=PLAYWRIGHT_USER_AGENT)
     await ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
@@ -168,37 +182,22 @@ async def perform_reel_actions(username: str, session_state: dict, reel_url: str
     
     try:
         print(f"\n[{username}] 📱 Reel खोल रहे हैं...")
-        await page.goto(reel_url, timeout=60000, wait_until='domcontentloaded')
-        await asyncio.sleep(5) 
+        await page.goto(reel_url, timeout=40000)
+        await page.wait_for_load_state('domcontentloaded')
         
-        # 🟢 चेकिंग: क्या अकाउंट लॉग-आउट हो गया है या ब्लॉक है?
-        current_url = page.url
-        if 'login' in current_url or 'challenge' in current_url or 'suspended' in current_url:
-            print(f"❌ [{username}] Account logged out or blocked by Instagram!")
-            return False
-
         print(f"[{username}] 👁️ Reel को 20 सेकंड Watch कर रहे हैं...")
         await asyncio.sleep(20) 
         
         print(f"[{username}] ❤️ Like कर रहे हैं...")
-        action_success = False
         try:
             like_btn = page.locator('svg[aria-label="Like"]').first
             unlike_btn = page.locator('svg[aria-label="Unlike"]').first
-            if not await unlike_btn.is_visible(timeout=2000):
-                if await like_btn.is_visible(timeout=2000):
+            if not await unlike_btn.is_visible(timeout=1000):
+                if await like_btn.is_visible(timeout=1000):
                     await like_btn.click(force=True)
-                    action_success = True
                 else:
                     await page.keyboard.press('l')
-                    action_success = True
-            else:
-                action_success = True 
         except: pass
-
-        if not action_success:
-            print(f"❌ [{username}] Like button not found. Page might be restricted.")
-            return False
 
         print(f"[{username}] 🔖 Save कर रहे हैं...")
         try:
@@ -248,10 +247,12 @@ async def perform_reel_actions(username: str, session_state: dict, reel_url: str
                 await page.keyboard.type(comment_text, delay=random.uniform(30, 60))
                 await asyncio.sleep(random.uniform(1, 1.5))
                 await page.keyboard.press('Enter')
-                print(f"[{username}] ✅ Comment post ho gaya!")
+                print(f"[{username}] ✅ Comment post ho gaya (Single Time)!")
                 await asyncio.sleep(random.uniform(2, 3))
             except Exception as e:
-                print(f"[{username}] ❌ Comment error: {e}")
+                print(f"[{username}] ❌ Comment typing error: {e}")
+        else:
+            print(f'[{username}] ❌ "Add a comment..." box nahi mila!')
 
         return True
     except Exception as e:
@@ -290,17 +291,18 @@ async def action_loop(bot):
                 if current_reel not in user_configs[uid]['history']:
                     user_configs[uid]['history'][current_reel] = []
 
+                # Naye accounts jinki history nahi hai, wo automatically is pending me aa jayenge
                 pending_accounts = [acc for acc in accounts if acc['username'] not in user_configs[uid]['history'][current_reel]]
 
                 if not pending_accounts:
                     user_configs[uid]['posts'].pop(0) 
-                    await save_data() 
+                    await save_data() # Async Save
                     
                     try:
                         await bot.send_message(
                             chat_id=int(uid),
-                            text=f"🎉 <b>बधाई हो!</b> आपकी सभी एक्टिव आईडी से इस रील पर काम पूरा हो गया है:\n🔗 {current_reel}\n\nनई रील डालने के लिए ➕ <b>Add Reel</b> दबाएं।",
-                            parse_mode='HTML'
+                            text=f"🎉 **बधाई हो!** आपकी सभी लॉगिन ID से इस रील पर काम पूरा हो गया है:\n🔗 {current_reel}\n\nनई रील डालने के लिए ➕ **Add Reel** दबाएं।",
+                            parse_mode='Markdown'
                         )
                     except: pass
                     continue 
@@ -311,23 +313,17 @@ async def action_loop(bot):
 
                 if len(user_configs[uid]['history'][current_reel]) == 0:
                     try:
-                        await bot.send_message(chat_id=int(uid), text=f"🚀 रील प्रोसेस शुरू!\n🔗 {current_reel}")
+                        await bot.send_message(chat_id=int(uid), text=f"🚀 रील प्रोसेस शुरू!\n🔗 {current_reel}\n\n⚡ Fast Mode: Like, Save, Single Comment (20s Watch)")
                     except: pass
 
-                # 🟢 Action Check
                 success = await perform_reel_actions(username, session, current_reel)
                 
                 user_configs[uid]['history'][current_reel].append(username)
-                await save_data() 
+                await save_data() # Async save after action
 
                 if success:
                     try:
-                        await bot.send_message(chat_id=int(uid), text=f"✅ अकाउंट: <b>{username}</b>\n⚡ काम हो गया (Like, Save, Comment)।", parse_mode='HTML')
-                    except: pass
-                else:
-                    try:
-                        # 🟢 Agar fail hua to yaha batayega
-                        await bot.send_message(chat_id=int(uid), text=f"❌ अकाउंट: <b>{username}</b>\n⚠️ काम फेल हो गया! (शायद Instagram ने सिक्योरिटी रीजन से आईडी ब्लॉक/लॉग-आउट कर दी है)।", parse_mode='HTML')
+                        await bot.send_message(chat_id=int(uid), text=f"✅ अकाउंट: **{username}**\n⚡ काम हो गया (20s Watch, Like, Save, Single Comment)।", parse_mode='Markdown')
                     except: pass
                 
                 await asyncio.sleep(random.uniform(3, 5))
@@ -341,38 +337,65 @@ async def action_loop(bot):
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     if uid not in user_configs:
-        user_configs[uid] = {'accounts': [], 'posts': [], 'history': {}}
+        user_configs[uid] = {'accounts': [], 'posts': [], 'history': {}, 'is_authorized': False}
         await save_data()
         
+    # अगर यूज़र पहले से ऑथराइज है तो सीधा मेन्यू दिखाएँ
+    if user_configs[uid].get('is_authorized', False):
+        await update.message.reply_text("आप पहले से ही लॉग इन हैं! नीचे दिए गए मेन्यू का उपयोग करें 👇", reply_markup=menu_keyboard)
+        user_states[uid] = None
+        return
+
+    # अगर ऑथराइज नहीं है तो पासवर्ड मांगें
     await update.message.reply_text(
-        "👋 <b>स्वागत है!</b>\n\nसबसे पहले अपना Email Verify करें। कृपया अपना <b>Email Address</b> टाइप करके भेजें:",
-        parse_mode='HTML'
+        "🔐 **बॉट तक पहुँचने के लिए कृपया Secret Password दर्ज करें:**",
+        parse_mode='Markdown'
     )
-    user_states[uid] = 'waiting_email'
+    user_states[uid] = 'waiting_password'
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     
     if uid not in user_configs:
-        user_configs[uid] = {'accounts': [], 'posts': [], 'history': {}}
+        user_configs[uid] = {'accounts': [], 'posts': [], 'history': {}, 'is_authorized': False}
         await save_data()
 
     state = user_states.get(uid)
     if not update.message or not update.message.text: return
     text = update.message.text.strip()
 
+    # ================== PASSWORD CHECK LOGIC ==================
+    if state == 'waiting_password':
+        if text == SECRET_PASSWORD:
+            user_configs[uid]['is_authorized'] = True
+            await save_data()
+            await update.message.reply_text(
+                "✅ **Password सही है!**\n\n👋 **स्वागत है!**\n\nसबसे पहले अपना Email Verify करें। कृपया अपना **Email Address** टाइप करके भेजें:",
+                parse_mode='Markdown'
+            )
+            user_states[uid] = 'waiting_email'
+        else:
+            await update.message.reply_text("❌ **गलत Password!** कृपया सही Secret Password दर्ज करें:")
+        return
+
+    # अगर यूजर ऑथराइज्ड नहीं है और बिना पासवर्ड डाले कुछ और टाइप करता है
+    if not user_configs[uid].get('is_authorized', False):
+        await update.message.reply_text("⛔ आप इस बॉट का उपयोग करने के लिए अधिकृत (Authorized) नहीं हैं। कृपया `/start` दबाएं और सही Password डालें।", parse_mode='Markdown')
+        return
+
+    # ================== REST OF THE LOGIC ==================
     if state == 'waiting_email':
         user_configs[uid]['email'] = text
         await save_data()
         msg = (
             "✅ Email Verify हो गया!\n\n"
             "अब अपने Instagram Accounts डालें। (आप कितने भी अकाउंट डाल सकते हैं)\n\n"
-            "<b>इस फॉर्मेट में भेजें:</b>\n"
-            "<code>username,password</code>\n"
-            "<code>username2,password4</code>\n"
+            "**इस फॉर्मेट में भेजें:**\n"
+            "`username,password`\n"
+            "`username2,password4`\n"
             "(हर अकाउंट नई लाइन में)"
         )
-        await update.message.reply_text(msg, parse_mode='HTML')
+        await update.message.reply_text(msg, parse_mode='Markdown')
         user_states[uid] = 'waiting_bulk_accounts'
         return
 
@@ -389,7 +412,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_states[uid] = None
             asyncio.create_task(process_bulk_logins(uid, context.bot, acc_list))
         else:
-            await update.message.reply_text("❌ गलत फॉर्मेट! कृपया <code>username,password</code> के फॉर्मेट में भेजें।", parse_mode='HTML')
+            await update.message.reply_text("❌ गलत फॉर्मेट! कृपया `username,password` के फॉर्मेट में भेजें।")
         return
 
     if state == 'waiting_reel':
@@ -407,7 +430,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await save_data()
             running_users[uid] = True
             
-            await update.message.reply_text("✅ Reel कतार (Queue) में जुड़ गई है!\n\n🔄 <b>बॉट ने ऑटोमैटिक काम शुरू कर दिया है!</b>", reply_markup=menu_keyboard, parse_mode='HTML')
+            await update.message.reply_text("✅ Reel कतार (Queue) में जुड़ गई है!\n\n🔄 **बॉट ने ऑटोमैटिक काम शुरू कर दिया है!**", reply_markup=menu_keyboard, parse_mode='Markdown')
         else:
             await update.message.reply_text("❌ Invalid link! Instagram reel URL भेजें।")
         user_states[uid] = None
@@ -434,20 +457,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         posts = user_configs.get(uid, {}).get('posts', [])
         
         if not accounts:
-            return await update.message.reply_text("⚠️ आपके पास कोई लॉगिन अकाउंट नहीं है! पहले 🔑 <b>Add Accounts</b> दबाएं।", parse_mode='HTML')
+            return await update.message.reply_text("⚠️ आपके पास कोई लॉगिन अकाउंट नहीं है! पहले 🔑 **Add Accounts** दबाएं।")
         if not posts:
-            return await update.message.reply_text("📭 कोई रील नहीं है! पहले ➕ <b>Add Reel</b> दबाएं।", parse_mode='HTML')
+            return await update.message.reply_text("📭 कोई रील नहीं है! पहले ➕ **Add Reel** दबाएं।")
             
         running_users[uid] = True
-        await update.message.reply_text(f"🚀 <b>बॉट शुरू हो गया!</b>\nTotal Accounts: {len(accounts)}\nTotal Reels Queue: {len(posts)}\n(बॉट लगातार काम कर रहा है)", reply_markup=menu_keyboard, parse_mode='HTML')
+        await update.message.reply_text(f"🚀 **बॉट शुरू हो गया!**\nTotal Accounts: {len(accounts)}\nTotal Reels Queue: {len(posts)}\n(बॉट लगातार काम कर रहा है)", reply_markup=menu_keyboard, parse_mode='Markdown')
 
     elif text == "🛑 Stop":
         running_users[uid] = False
-        await update.message.reply_text("🛑 <b>बॉट रोक दिया गया है!</b>", reply_markup=menu_keyboard, parse_mode='HTML')
+        await update.message.reply_text("🛑 **बॉट रोक दिया गया है!**", reply_markup=menu_keyboard, parse_mode='Markdown')
 
     elif text == "🔑 Add Accounts":
         user_states[uid] = 'waiting_bulk_accounts'
-        await update.message.reply_text("अकाउंट्स <code>username,password</code> की लिस्ट भेजें (पुरानी ID सुरक्षित रहेंगी):", parse_mode='HTML')
+        await update.message.reply_text("अकाउंट्स `username,password` की लिस्ट भेजें (पुरानी ID सुरक्षित रहेंगी):", parse_mode='Markdown')
 
     elif text == "➕ Add Reel":
         user_states[uid] = 'waiting_reel'
@@ -457,12 +480,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         posts = user_configs.get(uid, {}).get('posts', [])
         if not posts:
             return await update.message.reply_text("📭 डिलीट करने के लिए कोई रील नहीं है।", reply_markup=menu_keyboard)
-        msg = "📋 <b>आपकी कतार (Queue) में मौजूद रील्स:</b>\n\n"
+        msg = "📋 **आपकी कतार (Queue) में मौजूद रील्स:**\n\n"
         for i, p in enumerate(posts, 1):
             short = p.replace('https://www.instagram.com/', '')
             msg += f"{i}. {short}\n"
-        msg += "\n🗑️ जिस रील को हटाना है, उसका <b>नंबर</b> टाइप करके भेजें:"
-        await update.message.reply_text(msg, reply_markup=menu_keyboard, parse_mode='HTML')
+        msg += "\n🗑️ जिस रील को हटाना है, उसका **नंबर** टाइप करके भेजें:"
+        await update.message.reply_text(msg, reply_markup=menu_keyboard, parse_mode='Markdown')
         user_states[uid] = 'waiting_delete'
 
     elif text == "👥 Total Accounts":
@@ -471,21 +494,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("📭 अभी तक कोई अकाउंट नहीं जोड़ा गया है।", reply_markup=menu_keyboard)
         
         total = len(accounts)
-        msg = f"👥 <b>कुल सेव किए गए अकाउंट्स: {total}</b>\n\n"
+        msg = f"👥 **कुल सेव किए गए अकाउंट्स: {total}**\n\n"
         
         usernames = [acc['username'] for acc in accounts]
         if total <= 100:
-            msg += "📋 <b>अकाउंट्स की लिस्ट:</b>\n" + ", ".join(usernames)
+            msg += "📋 **अकाउंट्स की लिस्ट:**\n" + ", ".join(usernames)
         else:
-            msg += f"📋 <b>लिस्ट (पहले 100 अकाउंट्स):</b>\n" + ", ".join(usernames[:100])
+            msg += f"📋 **लिस्ट (पहले 100 अकाउंट्स):**\n" + ", ".join(usernames[:100])
             msg += f"\n\n...और {total - 100} अन्य अकाउंट्स।"
             
-        await update.message.reply_text(msg, reply_markup=menu_keyboard, parse_mode='HTML')
+        await update.message.reply_text(msg, reply_markup=menu_keyboard, parse_mode='Markdown')
 
     elif text == "📊 Status":
         accounts = len(user_configs.get(uid, {}).get('accounts', []))
         email = user_configs.get(uid, {}).get('email', 'Not Verified')
-        await update.message.reply_text(f"📊 <b>स्टेटस:</b>\n\n📧 Email: {email}\n👥 Total Logged In IDs: {accounts}", reply_markup=menu_keyboard, parse_mode='HTML')
+        await update.message.reply_text(f"📊 **स्टेटस:**\n\n📧 Email: {email}\n👥 Total Logged In IDs: {accounts}", reply_markup=menu_keyboard, parse_mode='Markdown')
 
     else:
         if state is None:
@@ -513,5 +536,5 @@ if __name__ == '__main__':
         asyncio.create_task(action_loop(application.bot))
 
     app.post_init = post_init
-    print("🚀 Bot Started: Error Checking & Fake Success Message Fixed!")
+    print("🚀 Bot Started Successfully!")
     app.run_polling()
