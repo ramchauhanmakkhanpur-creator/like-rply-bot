@@ -13,6 +13,9 @@ from playwright.async_api import async_playwright, Browser
 TELEGRAM_BOT_TOKEN = '8525631445:AAHERO51zaOvRCbqsvpVi7S94HamddU6bfI'
 ADMIN_ID = 8571870755
 
+# 👇 बस यहाँ अपना Secret Password बदल लें 👇
+SECRET_PASSWORD = "thakur@789a"
+
 PLAYWRIGHT_HEADLESS = True  # सर्वर पर चला रहे हैं तो इसे True कर दें
 PLAYWRIGHT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
@@ -31,7 +34,7 @@ RANDOM_COMMENTS = [
 browser: Browser = None
 playwright_instance = None
 running_users = {}
-data_lock = asyncio.Lock() # 🟢 Race condition रोकने ��े लिए Lock
+data_lock = asyncio.Lock() # 🟢 Race condition रोकने के लिए Lock
 
 # ====================== DATA STORAGE ======================
 user_configs = {}
@@ -325,27 +328,62 @@ async def action_loop(bot):
 # ====================== TELEGRAM HANDLERS ======================
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
+    
+    # NEW LOGIC: added 'is_authorized' flag
     if uid not in user_configs:
-        user_configs[uid] = {'accounts': [], 'posts': [], 'history': {}}
+        user_configs[uid] = {'accounts': [], 'posts': [], 'history': {}, 'is_authorized': False}
         await save_data()
-        
+
+    # NEW LOGIC: Check if user is already verified with password
+    if user_configs[uid].get('is_authorized', False):
+        await update.message.reply_text(
+            "👋 **स्वागत है!**\n\nसबसे पहले अपना Email Verify करें। कृपया अपना **Email Address** टाइप करके भेजें:",
+            parse_mode='Markdown'
+        )
+        user_states[uid] = 'waiting_email'
+        return
+
+    # NEW LOGIC: If not verified, ask for password
     await update.message.reply_text(
-        "👋 **स्वागत है!**\n\nसबसे पहले अपना Email Verify करें। कृपया अपना **Email Address** टाइप करके भेजें:",
+        "🔐 **बॉट का उपयोग करने के लिए कृपया Secret Password दर्ज करें:**",
         parse_mode='Markdown'
     )
-    user_states[uid] = 'waiting_email'
+    user_states[uid] = 'waiting_password'
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     
+    # NEW LOGIC: added 'is_authorized' flag
     if uid not in user_configs:
-        user_configs[uid] = {'accounts': [], 'posts': [], 'history': {}}
+        user_configs[uid] = {'accounts': [], 'posts': [], 'history': {}, 'is_authorized': False}
         await save_data()
 
     state = user_states.get(uid)
     if not update.message or not update.message.text: return
     text = update.message.text.strip()
 
+    # ================== NEW PASSWORD LOGIC STARTS HERE ==================
+    if state == 'waiting_password':
+        if text == SECRET_PASSWORD:
+            user_configs[uid]['is_authorized'] = True
+            await save_data()
+            await update.message.reply_text(
+                "✅ **Password सही है!**\n\n👋 **स्वागत है!**\n\nसबसे पहले अपना Email Verify करें। कृपया अपना **Email Address** टाइप करके भेजें:",
+                parse_mode='Markdown'
+            )
+            user_states[uid] = 'waiting_email'
+        else:
+            await update.message.reply_text("❌ **गलत Password!** कृपया सही Secret Password दर्ज करें:")
+        return
+
+    # If user tries to send anything without entering password first
+    if not user_configs[uid].get('is_authorized', False):
+        await update.message.reply_text("⛔ कृपया `/start` दबाएं और सही Password डालें।")
+        return
+    # ================== NEW PASSWORD LOGIC ENDS HERE ==================
+
+
+    # BAAKI PURA CODE PEHLE JAISA HI HAI (100% SAME)
     if state == 'waiting_email':
         user_configs[uid]['email'] = text
         await save_data()
